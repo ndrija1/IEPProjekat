@@ -1,0 +1,110 @@
+# Local development setup. Mirrors kubernetes.yaml: same images, same
+# environment variable names, but with host port mappings for easy debugging.
+#
+#   docker compose up --build -d
+#
+# Decision mode of the director service (simple | voting):
+#   PowerShell:  $env:DECISION_MODE = "voting"; docker compose up -d director
+#   bash:        DECISION_MODE=voting docker compose up -d director
+
+services:
+
+  # ------------------------------------------------------------ databases
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: iep-mysql-root
+      MYSQL_DATABASE: authentication
+    ports:
+      # host port 3307 because a local mysqld often occupies 3306
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-piep-mysql-root"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mongo:
+    image: mongo:7
+    ports:
+      # host port 27018 because another local project may occupy 27017
+      - "27018:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  redis:
+    image: redis:7
+    # Append-only persistence so pending orders survive a restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  # Ethereum simulator, used only when DECISION_MODE=voting.
+  # -d gives deterministic accounts so tests know the private keys.
+  ganache:
+    image: trufflesuite/ganache-cli
+    command: ["-d", "-p", "8545"]
+    ports:
+      - "8545:8545"
+
+  # ------------------------------------------------------------- services
+  authentication:
+    build: ./authentication
+    image: iep/authentication
+    environment:
+      DATABASE_HOST: mysql
+      DATABASE_PORT: "3306"
+      DATABASE_USERNAME: root
+      DATABASE_PASSWORD: iep-mysql-root
+      DATABASE_NAME: authentication
+      JWT_SECRET_KEY: JWT_SECRET_DEV_KEY
+      SERVICE_PORT: "5000"
+    ports:
+      - "5000:5000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  employee:
+    build: ./employee
+    image: iep/employee
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DATABASE: fund
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      JWT_SECRET_KEY: JWT_SECRET_DEV_KEY
+      SERVICE_PORT: "5001"
+    ports:
+      - "5001:5001"
+    depends_on:
+      - mongo
+      - redis
+
+  director:
+    build: ./director
+    image: iep/director
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DATABASE: fund
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      JWT_SECRET_KEY: JWT_SECRET_DEV_KEY
+      DECISION_MODE: ${DECISION_MODE:-simple}
+      GANACHE_URL: http://ganache:8545
+      SERVICE_PORT: "5002"
+    ports:
+      - "5002:5002"
+    depends_on:
+      - mongo
+      - redis
+      - ganache
+
+volumes:
+  mysql-data:
+  mongo-data:
+  redis-data:

@@ -1,0 +1,384 @@
+# Investment fund management system - Kubernetes configuration (single file).
+#
+# Build the service images first (docker compose build does it, or):
+#   docker build -t iep/authentication ./authentication
+#   docker build -t iep/employee       ./employee
+#   docker build -t iep/director      ./director
+#
+# Then start everything:
+#   kubectl apply -f kubernetes.yaml
+#
+# The services are reachable on the node (localhost on Docker Desktop):
+#   authentication  http://localhost:30000
+#   employee        http://localhost:30001   (3 replicas behind one Service)
+#   director        http://localhost:30002
+#   ganache         http://localhost:30545   (only needed for voting mode)
+#
+# All configuration is passed to the containers through environment
+# variables; non-secret values live in the ConfigMap, sensitive values in
+# the Secret. To switch the director to smart-contract voting, change
+# DECISION_MODE below to "voting" and re-apply.
+
+# ----------------------------------------------------------- configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iep-config
+data:
+  # authentication service -> MySQL
+  DATABASE_HOST: mysql
+  DATABASE_PORT: "3306"
+  DATABASE_USERNAME: root
+  DATABASE_NAME: authentication
+  # employee + director services -> MongoDB / Redis
+  MONGO_URI: mongodb://mongo:27017
+  MONGO_DATABASE: fund
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  # director service
+  DECISION_MODE: simple
+  GANACHE_URL: http://ganache:8545
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: iep-secret
+type: Opaque
+stringData:
+  DATABASE_PASSWORD: iep-mysql-root
+  MYSQL_ROOT_PASSWORD: iep-mysql-root
+  JWT_SECRET_KEY: JWT_SECRET_DEV_KEY
+  DIRECTOR_PASSWORD: evenmoremoney
+
+# ------------------------------------------------------------------- MySQL
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+spec:
+  replicas: 1
+  # Recreate: never run two MySQL pods against the same volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: iep-secret
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: iep-config
+                  key: DATABASE_NAME
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mysql-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+
+# ----------------------------------------------------------------- MongoDB
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-pvc
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+    spec:
+      containers:
+        - name: mongo
+          image: mongo:7
+          ports:
+            - containerPort: 27017
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mongo-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+spec:
+  selector:
+    app: mongo
+  ports:
+    - port: 27017
+
+# ------------------------------------------------------------------- Redis
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7
+          # Append-only persistence so pending orders survive a restart.
+          args: ["redis-server", "--appendonly", "yes"]
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: redis-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+
+# -------------------------------------------- Ganache (Ethereum simulator)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ganache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ganache
+  template:
+    metadata:
+      labels:
+        app: ganache
+    spec:
+      containers:
+        - name: ganache
+          image: trufflesuite/ganache-cli
+          # -d: deterministic accounts, so voter private keys are known.
+          args: ["-d", "-p", "8545"]
+          ports:
+            - containerPort: 8545
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ganache
+spec:
+  type: NodePort
+  selector:
+    app: ganache
+  ports:
+    - port: 8545
+      nodePort: 30545
+
+# -------------------------------------------------- authentication service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authentication
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authentication
+  template:
+    metadata:
+      labels:
+        app: authentication
+    spec:
+      containers:
+        - name: authentication
+          image: iep/authentication
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: iep-config
+            - secretRef:
+                name: iep-secret
+          env:
+            - name: SERVICE_PORT
+              value: "5000"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authentication
+spec:
+  type: NodePort
+  selector:
+    app: authentication
+  ports:
+    - port: 5000
+      nodePort: 30000
+
+# -------------------------------------------------------- employee service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: employee
+spec:
+  # Three replicas, as the assignment requires.
+  replicas: 3
+  selector:
+    matchLabels:
+      app: employee
+  template:
+    metadata:
+      labels:
+        app: employee
+    spec:
+      containers:
+        - name: employee
+          image: iep/employee
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5001
+          envFrom:
+            - configMapRef:
+                name: iep-config
+            - secretRef:
+                name: iep-secret
+          env:
+            - name: SERVICE_PORT
+              value: "5001"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: employee
+spec:
+  type: NodePort
+  selector:
+    app: employee
+  ports:
+    - port: 5001
+      nodePort: 30001
+
+# -------------------------------------------------------- director service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: director
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: director
+  template:
+    metadata:
+      labels:
+        app: director
+    spec:
+      containers:
+        - name: director
+          image: iep/director
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5002
+          envFrom:
+            - configMapRef:
+                name: iep-config
+            - secretRef:
+                name: iep-secret
+          env:
+            - name: SERVICE_PORT
+              value: "5002"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: director
+spec:
+  type: NodePort
+  selector:
+    app: director
+  ports:
+    - port: 5002
+      nodePort: 30002
