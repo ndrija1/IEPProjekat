@@ -382,3 +382,43 @@ spec:
   ports:
     - port: 5002
       nodePort: 30002
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: public-search
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: public-search
+  template:
+    metadata:
+      labels:
+        app: public-search
+    spec:
+      containers:
+        - name: public-search
+          image: iep/public-search
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5003
+          envFrom:
+            - configMapRef:
+                name: iep-config
+          env:
+            - name: SERVICE_PORT
+              value: "5003"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: public-search
+spec:
+  type: NodePort
+  selector:
+    app: public-search
+  ports:
+    - port: 5003
+      nodePort: 30003

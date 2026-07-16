@@ -85,6 +85,18 @@ services:
       - mongo
       - redis
 
+  public-search:
+    build: ./public_search
+    image: iep/public-search
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DATABASE: fund
+      SERVICE_PORT: "5003"
+    ports:
+      - "5003:5003"
+    depends_on:
+      - mongo
+
   director:
     build: ./director
     image: iep/director

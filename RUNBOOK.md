@@ -148,7 +148,8 @@ samo restart) — inače se stari `Voting.json` i dalje koristi.
 | Simptom | Lek |
 |---|---|
 | `port is already allocated` | port zauzet (zato MySQL→3307, Mongo→27018); krivac: `Get-NetTCPConnection -LocalPort XXXX -State Listen` |
-| grader pada na search/pending | nije bilo `down -v` — baza nije prazna |
+| grader pada na search/pending/report, ili "Email already exists" | **baza nije prazna** — `down -v` ide pre **SVAKOG** run-a, ne jednom po sesiji (grader sam sebi zaprlja bazu dok radi). Prepoznaš po **starim datumima** u ispisu ili **duplikatima** (AssetZeta dvaput). Provera: `docker exec iep-mongo-1 mongosh fund --quiet --eval "db.assets.countDocuments({})"` mora biti `0` |
+| grader pada odmah posle `up -d` | pustio si ga prebrzo — sačekaj ~20s i proveri `docker compose ps` (mysql "healthy") pre gradera |
 | izmena koda "ne radi" | zaboravljen `docker compose build` |
 | auth vraća 500 | `docker logs iep-authentication-1` — MySQL nije spreman/pao |
 | docker: "pipe not found" | Docker Desktop nije pokrenut |

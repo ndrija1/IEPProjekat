@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# grader / build artefacts
+grade_report*.json
+pytest_report.json
+report.html
+*.tar
+director/contracts/Voting.json
+
+# editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
