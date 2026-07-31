@@ -5,3 +5,6 @@ pymongo==4.5.0
 redis==5.0.1
 python-dateutil==2.8.2
 web3==6.11.3
+# web3 6.x imports pkg_resources, which setuptools 81 removed. Harmless on
+# Python 3.10; required on 3.12+, where setuptools is no longer bundled.
+setuptools<81

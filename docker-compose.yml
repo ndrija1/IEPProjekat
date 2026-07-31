@@ -24,7 +24,11 @@ services:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-piep-mysql-root"]
       interval: 5s
       timeout: 5s
-      retries: 20
+      # first start initialises an empty data volume, which on a slow disk
+      # takes well over a minute - start_period keeps those attempts from
+      # counting as failures, so authentication is not skipped
+      start_period: 180s
+      retries: 30
 
   mongo:
     image: mongo:7
@@ -53,7 +57,10 @@ services:
 
   # ------------------------------------------------------------- services
   authentication:
-    build: ./authentication
+    build:
+      context: ./authentication
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.10-slim}
     image: iep/authentication
     environment:
       DATABASE_HOST: mysql
@@ -70,7 +77,10 @@ services:
         condition: service_healthy
 
   employee:
-    build: ./employee
+    build:
+      context: ./employee
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.10-slim}
     image: iep/employee
     environment:
       MONGO_URI: mongodb://mongo:27017
@@ -86,7 +96,10 @@ services:
       - redis
 
   public-search:
-    build: ./public_search
+    build:
+      context: ./public_search
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.10-slim}
     image: iep/public-search
     environment:
       MONGO_URI: mongodb://mongo:27017
@@ -98,7 +111,10 @@ services:
       - mongo
 
   director:
-    build: ./director
+    build:
+      context: ./director
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.10-slim}
     image: iep/director
     environment:
       MONGO_URI: mongodb://mongo:27017

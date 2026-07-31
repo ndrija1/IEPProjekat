@@ -87,3 +87,9 @@ stare. Radi tačno ono što tekst traži; ne paničari ako neki stari test padne
 4. `Voting.sol` = **build director**, ne restart.
 5. Pre gradera: `docker compose ps` / `kubectl get pods` — sve mora da radi.
 6. Napravi **kopiju foldera** pre diranja — sigurna tačka za povratak.
+7. **Filtriranje/sortiranje/limit/zbir idu u Mongo, ne u Python.** Nikad
+   `sorted()`, `sum()`, `found[:n]` ili list comprehension sa `if` nad
+   rezultatom — koristi `.sort()`, `.limit()`, `{"$gte": ...}`, `$group`/`$sum`.
+   Tabela sa svim parovima ❌/✅ je u `ODBRANA-PLAN.md`.
+8. **Posle gašenja neta ne diraj `requirements.txt` ni `Dockerfile`** i nikad
+   `--no-cache` — poništava pip keš i build više ne može da prođe offline.

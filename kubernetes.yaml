@@ -236,6 +236,9 @@ spec:
       containers:
         - name: ganache
           image: trufflesuite/ganache-cli
+          # untagged means :latest, whose default pull policy is Always -
+          # pinned to IfNotPresent so the pod also starts without internet
+          imagePullPolicy: IfNotPresent
           # -d: deterministic accounts, so voter private keys are known.
           args: ["-d", "-p", "8545"]
           ports:
