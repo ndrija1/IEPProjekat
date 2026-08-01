@@ -1,0 +1,7 @@
+# Offline patch build - see director/Dockerfile.patch for the full explanation.
+#
+#   $env:DOCKER_BUILDKIT = "0"
+#   docker build -f employee/Dockerfile.patch -t iep/employee:latest employee
+FROM iep/employee:latest
+
+COPY . /service/

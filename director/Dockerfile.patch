@@ -1,0 +1,17 @@
+# Offline patch build. Starts from the image that was already built while the
+# network was up, so there is no pip install and no registry lookup - only the
+# changed sources are layered on top.
+#
+#   $env:DOCKER_BUILDKIT = "0"
+#   docker build -f director/Dockerfile.patch -t iep/director:latest director
+#
+# BuildKit must be off: it resolves the FROM image against the registry even
+# when the image is local, which fails with no network. The legacy builder
+# takes the local image directly.
+FROM iep/director:latest
+
+COPY . /service/
+
+# solc is already inside the image, so editing Voting.sol still recompiles
+# offline. Harmless when only .py files changed.
+RUN python compile_contract.py

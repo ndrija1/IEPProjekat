@@ -93,3 +93,6 @@ stare. Radi tačno ono što tekst traži; ne paničari ako neki stari test padne
    Tabela sa svim parovima ❌/✅ je u `ODBRANA-PLAN.md`.
 8. **Posle gašenja neta ne diraj `requirements.txt` ni `Dockerfile`** i nikad
    `--no-cache` — poništava pip keš i build više ne može da prođe offline.
+9. **Offline rebuild ide preko `.\patch.ps1 <servis>`**, ne preko
+   `docker compose build` — BuildKit i za `FROM` zove Docker Hub i pukne bez
+   mreže. Detalji u `ODBRANA-PLAN.md`.
