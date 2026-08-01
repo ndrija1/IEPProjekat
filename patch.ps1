@@ -54,9 +54,22 @@ $catalogue = @{
 function Invoke-BuilderPatch {
     param([string] $Image, [string] $Directory)
 
+    # BuildKit off, so the local FROM image is taken directly instead of being
+    # resolved against the registry. $env: is process-wide, so the previous
+    # value is put back - otherwise every later docker command in this window
+    # would silently keep using the legacy builder.
+    $previous = $env:DOCKER_BUILDKIT
     $env:DOCKER_BUILDKIT = '0'
-    docker build -f (Join-Path $Directory 'Dockerfile.patch') -t $Image $Directory
-    return ($LASTEXITCODE -eq 0)
+    try {
+        docker build -f (Join-Path $Directory 'Dockerfile.patch') -t $Image $Directory
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        if ($null -eq $previous) {
+            Remove-Item Env:\DOCKER_BUILDKIT -ErrorAction SilentlyContinue
+        } else {
+            $env:DOCKER_BUILDKIT = $previous
+        }
+    }
 }
 
 
