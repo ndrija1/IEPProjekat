@@ -1,0 +1,377 @@
+===============================================================================
+ KOMANDE — sve sto kucas, redom
+ IEP projekat, odbrana
+===============================================================================
+
+ Sve komande su za PowerShell, iz korena projekta (folder gde je
+ docker-compose.yml).
+
+ Portovi:
+   compose:     auth 5000 | employee 5001 | director 5002 | search 5003 | ganache 8545
+   kubernetes:  auth 30000 | employee 30001 | director 30002 | search 30003 | ganache 30545
+
+
+===============================================================================
+ 0. ENV VARIJABLE — sta se kuca, a sta ne
+===============================================================================
+
+ DOCKER_BUILDKIT   NE kucas, ako koristis patch.ps1 (skripta je sama postavi
+                   i vrati). Kucas SAMO ako zoves docker build rucno.
+
+ PYTHON_IMAGE      NE kucas. Podrazumevano je python:3.10-slim.
+                   Kucas samo ako te slike nema na masini.
+
+ DECISION_MODE     KUCAS, za voting rezim na compose-u.
+                   Na kubernetes-u se NE kuca — menja se u kubernetes.yaml.
+
+
+===============================================================================
+ 1. FAZA 1 — PRVIH 20 MINUTA, DOK NET RADI
+===============================================================================
+
+ NE citaj modifikaciju jos. Prvo obezbedi da build moze da prodje offline.
+
+ --- 1.1 Povuci sve slike (jedino sto net stvarno treba) -----------------------
+
+docker pull python:3.10-slim
+docker pull python:3.13-slim
+docker pull mysql:8.0
+docker pull mongo:7
+docker pull redis:7
+docker pull trufflesuite/ganache-cli
+
+ --- 1.2 Build svega ----------------------------------------------------------
+
+docker compose build
+
+ Ako python:3.10-slim ne postoji i ne moze da se povuce:
+
+$env:PYTHON_IMAGE = "python:3.13-slim"
+docker compose build
+
+ --- 1.3 Rezervna kopija slika (ako imas vremena) -----------------------------
+
+docker save -o iep-images.tar iep/authentication iep/employee iep/director iep/public-search python:3.10-slim mysql:8.0 mongo:7 redis:7 trufflesuite/ganache-cli
+
+ Vracanje kasnije:
+
+docker load -i iep-images.tar
+
+ --- 1.4 Ako si dobio .tar od profesora ---------------------------------------
+
+docker load -i ime-fajla.tar
+docker images
+
+
+===============================================================================
+ 2. POKRETANJE
+===============================================================================
+
+ --- 2.1 COMPOSE, simple rezim ------------------------------------------------
+
+docker compose down -v
+docker compose up -d
+docker compose ps
+
+ Ceka se da svih 8 kontejnera bude "Up". mysql prvi put inicijalizuje bazu
+ i to traje i preko 2 minuta — to je normalno, sacekaj.
+
+ --- 2.2 COMPOSE, voting rezim ------------------------------------------------
+
+ DECISION_MODE mora u ISTOM prozoru u kom radis up:
+
+$env:DECISION_MODE = "voting"
+docker compose down -v
+docker compose up -d
+
+ Provera da je varijabla stvarno stigla do kontejnera:
+
+docker compose exec director printenv DECISION_MODE
+
+ Nazad na simple:
+
+$env:DECISION_MODE = "simple"
+docker compose down -v
+docker compose up -d
+
+ --- 2.3 KUBERNETES -----------------------------------------------------------
+
+kubectl apply -f kubernetes.yaml
+kubectl get pods -w
+
+ Ceka se da SVI podovi budu 1/1. Ctrl+C da izadjes iz -w.
+
+ Za voting na kubernetes-u $env NE radi. Otvori kubernetes.yaml, nadji:
+
+     DECISION_MODE: simple
+
+ promeni u:
+
+     DECISION_MODE: voting
+
+ pa:
+
+kubectl delete -f kubernetes.yaml
+kubectl apply -f kubernetes.yaml
+
+ --- 2.4 Reset baze (pre SVAKOG grader run-a) ---------------------------------
+
+ compose:
+
+docker compose down -v
+docker compose up -d
+
+ kubernetes:
+
+kubectl delete -f kubernetes.yaml
+kubectl apply -f kubernetes.yaml
+
+
+===============================================================================
+ 3. GRADER
+===============================================================================
+
+ UVEK sveza baza pre pokretanja (tacka 2.4). Grader sam sebi zaprlja bazu,
+ pa se reset radi pre svakog run-a, ne jednom po sesiji.
+
+ Kopiraj ceo blok odjednom. Znak ` na kraju reda znaci "nastavak".
+
+ --- 3.1 COMPOSE, simple  (ocekuje se 180.00/180.00) --------------------------
+
+iep_grader\.venv\Scripts\pytest.exe iep_grader -q --type all `
+    --authentication-url http://127.0.0.1:5000 --jwt-secret JWT_SECRET_DEV_KEY `
+    --roles-field role --employee-role employee --director-role director `
+    --with-authentication --employee-url http://127.0.0.1:5001 `
+    --director-url http://127.0.0.1:5002 --wait-for-services
+
+ --- 3.2 COMPOSE, voting  (ocekuje se 179.00/179.00) --------------------------
+
+iep_grader\.venv\Scripts\pytest.exe iep_grader -q --type all `
+    --authentication-url http://127.0.0.1:5000 --jwt-secret JWT_SECRET_DEV_KEY `
+    --roles-field role --employee-role employee --director-role director `
+    --with-authentication --employee-url http://127.0.0.1:5001 `
+    --director-url http://127.0.0.1:5002 --wait-for-services `
+    --with-blockchain --provider-url http://127.0.0.1:8545
+
+ --- 3.3 KUBERNETES, voting  (ovo je dalo 179/179) ----------------------------
+
+iep_grader\.venv\Scripts\pytest.exe iep_grader -q --type all `
+    --authentication-url http://127.0.0.1:30000 --jwt-secret JWT_SECRET_DEV_KEY `
+    --roles-field role --employee-role employee --director-role director `
+    --with-authentication --employee-url http://127.0.0.1:30001 `
+    --director-url http://127.0.0.1:30002 --wait-for-services `
+    --with-blockchain --provider-url http://127.0.0.1:30545
+
+ --- 3.4 KUBERNETES, simple ---------------------------------------------------
+
+ Isto kao 3.3, samo bez poslednja dva reda (--with-blockchain i --provider-url).
+
+ --- 3.5 Ako grader venv ne radi ----------------------------------------------
+
+python -m venv iep_grader\.venv
+iep_grader\.venv\Scripts\python.exe -m pip install -r iep_grader\requirements-pytest.txt "setuptools<81"
+
+
+===============================================================================
+ 4. NET JE PAO — PRAVILA
+===============================================================================
+
+ NE SMES:
+   - menjati requirements.txt        (ponisti pip kes, build trazi PyPI)
+   - menjati Dockerfile              (isto)
+   - docker compose build            (BuildKit zove Docker Hub i za FROM)
+   - docker compose build --no-cache (najgore od svega)
+
+ SMES:
+   - menjati .py fajlove i .sol fajlove
+   - i onda rebuild preko patch.ps1 (tacka 5)
+
+
+===============================================================================
+ 5. REBUILD BEZ NETA — patch.ps1
+===============================================================================
+
+ compose:
+
+.\patch.ps1 director
+
+ kubernetes:
+
+.\patch.ps1 director -k8s
+
+ Umesto "director" ide: authentication | employee | director | public-search
+ ili "all" za sva cetiri.
+
+ Skripta sama postavi DOCKER_BUILDKIT=0 i vrati ga posle. Ne kucas ga.
+
+ --- 5.1 Rucno, ako skripta zezne ---------------------------------------------
+
+$env:DOCKER_BUILDKIT = "0"
+docker build -f director\Dockerfile.patch -t iep/director:latest director
+
+ pa restart — kubernetes:
+
+kubectl rollout restart deployment/director
+kubectl get pods
+
+ ili compose:
+
+docker compose up -d --force-recreate --no-deps director
+
+ --- 5.2 Ako je klaster minikube ili kind -------------------------------------
+
+ Posle svakog builda slika mora ponovo u klaster:
+
+minikube image load iep/director
+
+ ili:
+
+kind load docker-image iep/director
+
+ Sa Docker Desktop kubernetes-om ovo NE treba.
+
+
+===============================================================================
+ 6. PROVERA I DEBUG
+===============================================================================
+
+ --- 6.1 Sta radi -------------------------------------------------------------
+
+docker compose ps
+kubectl get pods
+
+ --- 6.2 LOG — ovo je prvo sto gledas kad nesto crkne -------------------------
+
+docker compose logs director --tail=30
+kubectl logs deployment/director --tail=30
+
+ Ako se pod vec restartovao:
+
+kubectl logs deployment/director --previous --tail=30
+
+ --- 6.3 Koliko ima podataka u bazi -------------------------------------------
+
+docker exec iep-mongo-1 mongosh fund --quiet --eval "db.assets.countDocuments({})"
+
+ 0 znaci prazna baza. To NIJE bug u kodu — imovina ulazi u Mongo tek kad
+ director odobri order. Pusti grader da napuni bazu.
+
+ --- 6.4 Rucno gadjanje rute --------------------------------------------------
+
+$login = Invoke-RestMethod -Uri http://localhost:5000/login -Method Post -ContentType application/json -Body '{"email":"director@fund.com","password":"evenmoremoney"}'
+Invoke-RestMethod -Uri http://localhost:5002/report -Headers @{Authorization="Bearer $($login.accessToken)"}
+
+ Na kubernetes-u zameni 5000 -> 30000 i 5002 -> 30002.
+
+ --- 6.5 Sta znaci koji status ------------------------------------------------
+
+ ImagePullBackOff / ErrImagePull
+     Trazi sliku sa neta. Slika nije u klasteru — minikube image load /
+     kind load docker-image. Proveri imagePullPolicy: IfNotPresent.
+
+ CrashLoopBackOff
+     Aplikacija puca pri startu. PROCITAJ LOG (6.2).
+
+ Pending
+     Nema resursa ili PVC ne moze da se veze:
+     kubectl describe pod IME-PODA
+
+ --- 6.6 Sta znaci koja greska u logu -----------------------------------------
+
+ ModuleNotFoundError: No module named 'pkg_resources'
+     setuptools<81 nije u slici. Slika je stara — rebuild pa reload u klaster.
+
+ FileNotFoundError: contracts/Voting.json
+     compile_contract.py nije prosao pri buildu. Proveri da postoji
+     director\vendor\solc.
+
+ Connection refused ka ganache
+     ganache pod nije ziv: kubectl get pods
+
+ Docker daemon ne radi uopste
+     Pokreni Docker Desktop i sacekaj da se ucita.
+
+
+===============================================================================
+ 7. MODIFIKACIJA
+===============================================================================
+
+ --- 7.1 Zlatno pravilo: radi u Mongu, ne u Pythonu ---------------------------
+
+ NE:  sorted(found, key=...)              DA:  .sort("buying_price", -1)
+ NE:  found[:n]                           DA:  .limit(n)
+ NE:  found[n:]                           DA:  .skip(n)
+ NE:  len(found)                          DA:  assets.count_documents(query)
+ NE:  sum(a["x"] for a in found)          DA:  $group sa $sum
+ NE:  total / len(found)                  DA:  $group sa $avg
+ NE:  [a for a in found if a["p"] >= x]   DA:  query["p"] = {"$gte": x}
+ NE:  if "selling_date" in a              DA:  {"selling_date": {"$exists": True}}
+
+ Uzor je report() u director\app.py — jedan jedini aggregate() pipeline.
+
+ --- 7.2 Dve zamke ------------------------------------------------------------
+
+ RUTA NA KRAJU FAJLA VRACA 404.
+     Ispod je  if __name__ == "__main__": application.run(...)  koji blokira
+     zauvek. Sve posle njega se nikad ne izvrsi. Rutu stavi IZNAD tog bloka.
+
+ PRAZAN ODGOVOR NIJE BUG.
+     Posle down -v je baza prazna. Pusti grader da je napuni.
+
+ --- 7.3 Gde se sta dira ------------------------------------------------------
+
+ nov filter pretrage
+     build_search_query() u employee\app.py I public_search\app.py
+     rebuild: employee, public-search
+
+ novo polje na imovini
+     create_buy_order() u employee\app.py
+     apply_order()      u director\app.py
+     serialize_asset()  u employee\app.py I public_search\app.py
+     rebuild: employee, director, public-search  +  OBAVEZNO down -v
+
+ izmena izvestaja
+     report() u director\app.py
+     rebuild: director
+
+ nova ruta
+     iznad if __name__ bloka
+     rebuild: taj servis
+
+ izmena glasanja
+     director\contracts\Voting.sol
+     rebuild: director (BUILD, ne restart)
+
+ --- 7.4 Odgovori koje ne smes da pokvaris ------------------------------------
+
+ greska validacije     400  {"message": "..."}     -> funkcija error()
+ fali/pogresna uloga   401  {"msg": "Missing Authorization Header"}
+ uspeh bez tela        200  return "", 200
+ uspeh sa telom        200  return jsonify(...), 200
+
+ Redosled provera je takodje bitan. U /decision se prvo do kraja validira
+ uuid, pa tek onda approved. Ne premestaj takve provere.
+
+ Detaljan primer nove rute je u MODIFIKACIJA-NOVA-RUTA.md.
+
+
+===============================================================================
+ 8. REDOSLED NA DAN ODBRANE — skraceno
+===============================================================================
+
+ 1.  docker pull ... (tacka 1.1)
+ 2.  docker compose build
+ 3.  docker compose down -v ; docker compose up -d
+ 4.  grader simple  -> 180/180
+ 5.  voting: $env:DECISION_MODE = "voting" ; down -v ; up -d
+ 6.  grader voting  -> 179/179
+ 7.  ako ide k8s: kubectl apply -f kubernetes.yaml ; grader (3.3)
+ 8.  TEK SADA citaj modifikaciju
+ 9.  napisi kod (iznad if __name__ !)
+ 10. .\patch.ps1 <servis>      ili   .\patch.ps1 <servis> -k8s
+ 11. docker compose ps / kubectl get pods   — proveri da je ZIVO
+ 12. reset baze pa grader ponovo
+
+ Ako nesto crkne: LOG PRVO (6.2). Bez loga je sve nagadjanje.
+
+===============================================================================
